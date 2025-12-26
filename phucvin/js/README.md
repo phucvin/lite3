@@ -49,8 +49,8 @@ Running on 5 flat keys + 1 nested object (total 6 keys).
 
 | Operation | JSON (us) | Lite3 JS (us) |
 |-----------|-----------|---------------|
-| Stringify / Set | 1.957 | 20.939 |
-| Parse / Get (All) | 2.292 | 4.912 |
-| Parse / Get (Single Nested) | 1.261 | 1.019 |
+| Stringify / Set | 0.926 | 45.485 |
+| Parse / Get (All) | 2.136 | 8.951 |
+| Parse / Get (Single Nested) | 1.343 | 1.791 |
 
 *Note: The JS implementation is currently basic and unoptimized compared to the C version. The 'Set' operation is slower because it involves ArrayBuffer manipulations and text encoding in JS. 'Get' operations are reasonably fast, and single nested field access is faster than JSON.parse (which requires parsing the whole string).*

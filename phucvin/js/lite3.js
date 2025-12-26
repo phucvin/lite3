@@ -52,15 +52,6 @@ const LITE3_TREE_HEIGHT_MAX = 9;
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-function djb2(str) {
-    let hash = 5381;
-    for (let i = 0; i < str.length; i++) {
-        hash = ((hash << 5) + hash) + str.charCodeAt(i);
-        hash = hash >>> 0; // Ensure 32-bit unsigned
-    }
-    return hash;
-}
-
 class Lite3 {
     constructor(buffer) {
         if (buffer instanceof ArrayBuffer) {
@@ -130,6 +121,20 @@ class Lite3 {
                (!!keySize);
     }
 
+    _read_key(offset) {
+        let tag_byte = this.u8[offset];
+        let key_tag_size = (tag_byte & LITE3_KEY_TAG_SIZE_MASK) + 1;
+        let key_size = 0;
+        if (key_tag_size === 1) key_size = this.u8[offset];
+        else if (key_tag_size === 2) key_size = this.view.getUint16(offset, true);
+        else if (key_tag_size === 4) key_size = this.view.getUint32(offset, true);
+
+        key_size >>= LITE3_KEY_TAG_KEY_SIZE_SHIFT;
+
+        let keyBytes = this.u8.subarray(offset + key_tag_size, offset + key_tag_size + key_size);
+        return decoder.decode(keyBytes);
+    }
+
     set_null(buflen, ofs, bufsz, key) {
         return this._set_impl(buflen, ofs, bufsz, key, LITE3_TYPE.NULL, null);
     }
@@ -185,7 +190,6 @@ class Lite3 {
     _set_impl(buflen, ofs, bufsz, key, type, valBytes) {
         let keyBytes = encoder.encode(key);
         let keySize = keyBytes.length;
-        let keyHash = djb2(key);
         let keyTagSize = this._getKeyTagSize(keySize);
 
         let valLen = LITE3_TYPE_SIZES[type];
@@ -197,79 +201,89 @@ class Lite3 {
 
         let node = ofs;
 
-        // Check if key exists
+        // Binary search for key
         let oldKc = this.view.getUint32(node + LITE3_NODE_SIZE_KC_OFFSET, true) & LITE3_NODE_KEY_COUNT_MASK;
-        let i = 0;
-        while (i < oldKc) {
-            let h = this.view.getUint32(node + 4 + i * 4, true);
-            if (h < keyHash) i++;
-            else break;
+        let left = 0;
+        let right = oldKc;
+        while (left < right) {
+            let mid = (left + right) >>> 1;
+            let midKeyOfs = this.view.getUint32(node + 4 + mid * 4, true);
+            let midKey = this._read_key(midKeyOfs);
+            if (midKey < key) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        let i = left;
+
+        // Check if key already exists
+        if (i < oldKc) {
+             let existingKeyOfs = this.view.getUint32(node + 4 + i * 4, true);
+             if (this._read_key(existingKeyOfs) === key) {
+                 // Found existing key.
+                 // Simplified overwrite: just append new value if it fits?
+                 // For now, in basic implementation, we just append a NEW key. Overwriting existing keys not fully supported for variable length.
+                 // But let's assume user is building object.
+                 // let kvOfs = this.view.getUint32(node + 36 + i * 4, true);
+                 // TODO: implement overwrite
+                 return -1;
+             }
         }
 
-        if (i < oldKc && this.view.getUint32(node + 4 + i * 4, true) === keyHash) {
-            // Found existing key hash.
-            // Simplified overwrite: just append new value if it fits?
-            // For now, in basic implementation, we just append a NEW key. Overwriting existing keys not fully supported for variable length.
-            // But let's assume user is building object.
-             let kvOfs = this.view.getUint32(node + 36 + i * 4, true);
-             // TODO: implement overwrite
-        } else {
-            // New key
-            if (oldKc >= LITE3_NODE_KEY_COUNT_MAX) {
-                throw new Error("Node full (splitting not implemented in basic JS version)");
-            }
-
-            // Insert at i
-            // Shift
-            for (let j = oldKc; j > i; j--) {
-                // hashes
-                this.view.setUint32(node + 4 + j * 4, this.view.getUint32(node + 4 + (j - 1) * 4, true), true);
-                // kv_ofs
-                this.view.setUint32(node + 36 + j * 4, this.view.getUint32(node + 36 + (j - 1) * 4, true), true);
-            }
-
-            this.view.setUint32(node + 4 + i * 4, keyHash, true);
-
-            // Increment count
-            let sizeKc = this.view.getUint32(node + LITE3_NODE_SIZE_KC_OFFSET, true);
-            let kc = (sizeKc & LITE3_NODE_KEY_COUNT_MASK) + 1;
-            let size = (sizeKc >>> LITE3_NODE_SIZE_SHIFT) + 1;
-
-            sizeKc = (size << LITE3_NODE_SIZE_SHIFT) | kc;
-            this.view.setUint32(node + LITE3_NODE_SIZE_KC_OFFSET, sizeKc, true);
-
-            // Append data
-            let newOfs = buflen.val;
-
-            // Write Key Size Tag
-            let keySizeTag = (keySize << LITE3_KEY_TAG_KEY_SIZE_SHIFT) | (keyTagSize - 1);
-            if (keyTagSize === 1) this.u8[newOfs] = keySizeTag;
-            else if (keyTagSize === 2) this.view.setUint16(newOfs, keySizeTag, true);
-            else if (keyTagSize === 4) this.view.setUint32(newOfs, keySizeTag, true);
-
-            newOfs += keyTagSize;
-
-            // Write Key
-            this.u8.set(keyBytes, newOfs);
-            newOfs += keySize;
-
-            // Write Val Type
-            this.u8[newOfs] = type;
-            newOfs += 1; // LITE3_VAL_SIZE
-
-            // Write Val
-            if (valBytes) {
-                this.u8.set(valBytes, newOfs);
-                newOfs += valBytes.length;
-            }
-
-            // Update node kv_ofs
-            this.view.setUint32(node + 36 + i * 4, buflen.val, true);
-
-            buflen.val = newOfs;
-            return 0;
+        // New key insertion
+        if (oldKc >= LITE3_NODE_KEY_COUNT_MAX) {
+            throw new Error("Node full (splitting not implemented in basic JS version)");
         }
-        return -1;
+
+        // Insert at i
+        // Shift
+        for (let j = oldKc; j > i; j--) {
+            // hashes (now storing key pointers)
+            this.view.setUint32(node + 4 + j * 4, this.view.getUint32(node + 4 + (j - 1) * 4, true), true);
+            // kv_ofs
+            this.view.setUint32(node + 36 + j * 4, this.view.getUint32(node + 36 + (j - 1) * 4, true), true);
+        }
+
+        // Increment count
+        let sizeKc = this.view.getUint32(node + LITE3_NODE_SIZE_KC_OFFSET, true);
+        let kc = (sizeKc & LITE3_NODE_KEY_COUNT_MASK) + 1;
+        let size = (sizeKc >>> LITE3_NODE_SIZE_SHIFT) + 1;
+
+        sizeKc = (size << LITE3_NODE_SIZE_SHIFT) | kc;
+        this.view.setUint32(node + LITE3_NODE_SIZE_KC_OFFSET, sizeKc, true);
+
+        // Append data
+        let newOfs = buflen.val;
+
+        // Write Key Size Tag
+        let keySizeTag = (keySize << LITE3_KEY_TAG_KEY_SIZE_SHIFT) | (keyTagSize - 1);
+        if (keyTagSize === 1) this.u8[newOfs] = keySizeTag;
+        else if (keyTagSize === 2) this.view.setUint16(newOfs, keySizeTag, true);
+        else if (keyTagSize === 4) this.view.setUint32(newOfs, keySizeTag, true);
+
+        newOfs += keyTagSize;
+
+        // Write Key
+        this.u8.set(keyBytes, newOfs);
+        newOfs += keySize;
+
+        // Write Val Type
+        this.u8[newOfs] = type;
+        newOfs += 1; // LITE3_VAL_SIZE
+
+        // Write Val
+        if (valBytes) {
+            this.u8.set(valBytes, newOfs);
+            newOfs += valBytes.length;
+        }
+
+        // Update node kv_ofs AND hashes (pointers to sorted key strings)
+        this.view.setUint32(node + 36 + i * 4, buflen.val, true);
+        this.view.setUint32(node + 4 + i * 4, buflen.val, true);
+
+        buflen.val = newOfs;
+        return 0;
     }
 
     get_str(buflen, ofs, key) {
@@ -309,18 +323,28 @@ class Lite3 {
     }
 
     _get_impl(buflen, ofs, key) {
-         let keyHash = djb2(key);
          let node = ofs;
          let kc = this.view.getUint32(node + LITE3_NODE_SIZE_KC_OFFSET, true) & LITE3_NODE_KEY_COUNT_MASK;
-         let i = 0;
-         while (i < kc) {
-            let h = this.view.getUint32(node + 4 + i * 4, true);
-            if (h < keyHash) i++;
-            else break;
-        }
 
-        if (i < kc && this.view.getUint32(node + 4 + i * 4, true) === keyHash) {
+         let left = 0;
+         let right = kc;
+         while (left < right) {
+            let mid = (left + right) >>> 1;
+            let midKeyOfs = this.view.getUint32(node + 4 + mid * 4, true);
+            let midKey = this._read_key(midKeyOfs);
+            if (midKey < key) {
+                left = mid + 1;
+            } else {
+                right = mid;
+            }
+        }
+        let i = left;
+
+        if (i < kc) {
+             // In new impl, hashes[i] == kvOfs.
+             // We use kvOfs for consistency
              let kvOfs = this.view.getUint32(node + 36 + i * 4, true);
+
              // Verify key to be sure
              let kTag = this.u8[kvOfs];
              let kTagSize = (kTag & LITE3_KEY_TAG_SIZE_MASK) + 1;
