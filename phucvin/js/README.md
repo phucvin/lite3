@@ -25,6 +25,10 @@ console.log(l3.get_i64(buflen.val, 0, "count")); // 42
 
 // Print as JSON
 l3.json_print(buflen.val, 0);
+
+// Nested Objects
+let subOfs = l3.set_obj(buflen, 0, 1024, "config");
+l3.set_str(buflen, subOfs, 1024, "host", "localhost");
 ```
 
 ## Running Tests
@@ -41,11 +45,12 @@ node benchmark.js
 
 ### Latest Benchmark Results
 
-Running on 5 keys (small object) due to basic implementation limits (no node splitting).
+Running on 5 flat keys + 1 nested object (total 6 keys).
 
 | Operation | JSON (us) | Lite3 JS (us) |
 |-----------|-----------|---------------|
-| Stringify / Set | 1.580 | 15.232 |
-| Parse / Get | 1.475 | 4.252 |
+| Stringify / Set | 1.957 | 20.939 |
+| Parse / Get (All) | 2.292 | 4.912 |
+| Parse / Get (Single Nested) | 1.261 | 1.019 |
 
-*Note: The JS implementation is currently basic and unoptimized compared to the C version. The 'Set' operation is slower because it involves ArrayBuffer manipulations and text encoding in JS. 'Get' is reasonably fast but still slower than V8 optimized JSON.parse for small objects.*
+*Note: The JS implementation is currently basic and unoptimized compared to the C version. The 'Set' operation is slower because it involves ArrayBuffer manipulations and text encoding in JS. 'Get' operations are reasonably fast, and single nested field access is faster than JSON.parse (which requires parsing the whole string).*

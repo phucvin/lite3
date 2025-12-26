@@ -31,6 +31,29 @@ function test() {
     l3.set_bool(buflen, 0, 1024, "boolFalse", false);
     assert.strictEqual(l3.get_bool(buflen.val, 0, "boolFalse"), false, "Should retrieve false");
 
+    // Test Nested Object
+    let subOfs = l3.set_obj(buflen, 0, 1024, "nested");
+    assert.ok(subOfs !== null, "Should create nested object");
+
+    l3.set_str(buflen, subOfs, 1024, "subkey", "subval");
+    let retrievedSubOfs = l3.get_obj(buflen.val, 0, "nested");
+    assert.strictEqual(retrievedSubOfs, subOfs, "Should retrieve correct nested object offset");
+
+    let subVal = l3.get_str(buflen.val, subOfs, "subkey");
+    assert.strictEqual(subVal, "subval", "Should retrieve value from nested object");
+
+    // Verify parent integrity after nested modification
+    l3.set_str(buflen, 0, 1024, "afterNested", "ok");
+    assert.strictEqual(l3.get_str(buflen.val, 0, "afterNested"), "ok", "Should set/get on parent after nested");
+    assert.strictEqual(l3.get_str(buflen.val, 0, "hello"), "world", "Should still retrieve initial string");
+
+    // Verify nested integrity after parent modification
+    assert.strictEqual(l3.get_str(buflen.val, subOfs, "subkey"), "subval", "Nested value should persist");
+
+    // Verify Isolation (Child keys not in Parent, Parent keys not in Child)
+    assert.strictEqual(l3.get_str(buflen.val, 0, "subkey"), null, "Child key should not be in Parent");
+    assert.strictEqual(l3.get_str(buflen.val, subOfs, "hello"), null, "Parent key should not be in Child");
+
     // Test JSON Print
     console.log("JSON Output:");
     l3.json_print(buflen.val, 0);

@@ -165,6 +165,20 @@ class Lite3 {
         return this._set_impl(buflen, ofs, bufsz, key, LITE3_TYPE.STRING, valBuf);
     }
 
+    set_obj(buflen, ofs, bufsz, key) {
+        // Create 95 bytes of zeros.
+        // The node structure (96 bytes) starts with Type (1 byte).
+        // _set_impl writes Type (1 byte) + valBytes (95 bytes).
+        // valBytes corresponds to bytes 1..95 of the node.
+        // Since a fresh node is Type + Zeros, we just need Zeros.
+        let valBuf = new Uint8Array(LITE3_NODE_SIZE - 1);
+
+        let res = this._set_impl(buflen, ofs, bufsz, key, LITE3_TYPE.OBJECT, valBuf);
+        if (res !== 0) return null;
+
+        return this.get_obj(buflen, ofs, key);
+    }
+
     // Simplifed set implementation (no split support for basic implementation)
     // Supports appending to end if buffer allows.
     // buflen is an object { val: size } to be updated.
@@ -288,6 +302,12 @@ class Lite3 {
         return this.u8[res.offset] !== 0;
     }
 
+    get_obj(buflen, ofs, key) {
+        let res = this._get_impl(buflen, ofs, key);
+        if (!res || res.type !== LITE3_TYPE.OBJECT) return null;
+        return res.offset - 1;
+    }
+
     _get_impl(buflen, ofs, key) {
          let keyHash = djb2(key);
          let node = ofs;
@@ -354,6 +374,9 @@ class Lite3 {
         if (type === LITE3_TYPE.STRING) {
             let len = new DataView(this.buffer, offset, 4).getUint32(0, true);
             return decoder.decode(this.u8.subarray(offset + 4, offset + 4 + len - 1));
+        }
+        if (type === LITE3_TYPE.OBJECT || type === LITE3_TYPE.ARRAY) {
+             return this._to_json(null, offset - 1);
         }
         if (type === LITE3_TYPE.NULL) return null;
         return "UNKNOWN";
