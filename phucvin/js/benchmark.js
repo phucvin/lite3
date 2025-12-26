@@ -70,20 +70,37 @@ function benchmark() {
     end = performance.now();
     let lite3GetTime = (end - start) / 10000;
 
+    // Lite3 Nested Get
+    // Setup nested object
+    buflen = { val: 0 };
+    buflen.val = l3.init_obj();
+    let subOfs = l3.set_obj(buflen, 0, 1024, "nested");
+    l3.set_str(buflen, subOfs, 1024, "subKey", "subVal");
+
+    start = performance.now();
+    for(let k=0; k<10000; k++) {
+         let sOfs = l3.get_obj(buflen.val, 0, "nested");
+         l3.get_str(buflen.val, sOfs, "subKey");
+    }
+    end = performance.now();
+    let lite3NestedGetTime = (end - start) / 10000;
+
     console.log(`
 Benchmark Results (Average per iteration, ${itemCount} keys):
 ------------------------------------------------------------
-JSON.stringify: ${(jsonStringifyTime * 1000).toFixed(3)} us
-JSON.parse:     ${(jsonParseTime * 1000).toFixed(3)} us
-Lite3 Set:      ${(lite3SetTime * 1000).toFixed(3)} us
-Lite3 Get:      ${(lite3GetTime * 1000).toFixed(3)} us
+JSON.stringify:     ${(jsonStringifyTime * 1000).toFixed(3)} us
+JSON.parse:         ${(jsonParseTime * 1000).toFixed(3)} us
+Lite3 Set:          ${(lite3SetTime * 1000).toFixed(3)} us
+Lite3 Get:          ${(lite3GetTime * 1000).toFixed(3)} us
+Lite3 Nested Get:   ${(lite3NestedGetTime * 1000).toFixed(3)} us
     `);
 
     return {
         jsonStringifyTime,
         jsonParseTime,
         lite3SetTime,
-        lite3GetTime
+        lite3GetTime,
+        lite3NestedGetTime
     };
 }
 

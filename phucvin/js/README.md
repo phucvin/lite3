@@ -25,6 +25,10 @@ console.log(l3.get_i64(buflen.val, 0, "count")); // 42
 
 // Print as JSON
 l3.json_print(buflen.val, 0);
+
+// Nested Objects
+let subOfs = l3.set_obj(buflen, 0, 1024, "config");
+l3.set_str(buflen, subOfs, 1024, "host", "localhost");
 ```
 
 ## Running Tests
